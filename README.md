@@ -79,14 +79,22 @@ A second task, **Full Code Extract**, aggregates full `.cs` contents for trouble
 
 ```mermaid
 flowchart LR
-    A[Console App<br/>(.NET 9)] --> B[Prompts & Options]
-    B --> C[Scanner<br/>(Files & Filters)]
-    C --> D[Roslyn Parser<br/>(Classes/Records/Methods/Ctors)]
-    D --> E[Comment Cleaner<br/>(XML /// // /* */)]
-    E --> F[JSON Exporter<br/>(Project Mapping)]
-    C --> G[Full Code Extract<br/>(.cs aggregation)]
-    F --> H[AI Assistants<br/>(ChatGPT/Copilot/...)]
+    A["Console App
+(.NET 9)"] --> B["Prompts & Options"]
+    B --> C["Scanner
+(Files & Filters)"]
+    C --> D["Roslyn Parser
+(Classes/Records/Methods/Ctors)"]
+    D --> E["Comment Cleaner
+(XML, //, /* */)"]
+    E --> F["JSON Exporter
+(Project Mapping)"]
+    C --> G["Full Code Extract
+(.cs aggregation)"]
+    F --> H["AI Assistants
+(ChatGPT/Copilot/...)"]
     G --> H
+```
 
 ---
 
@@ -98,12 +106,15 @@ flowchart LR
 # build & run
 dotnet build
 dotnet run --project src/Darwin.SolutionInsightForAI.App/Darwin.SolutionInsightForAI.App.csproj
+```
 
 During startup, choose a task and accept defaults or provide custom paths via prompts.
 
-Configuration
-Edit appsettings.json to set defaults (Windows-style paths):
+### Configuration
 
+Edit `appsettings.json` to set defaults (Windows-style paths):
+
+```json
 {
   "GeneratorOptions": {
     "Paths": {
@@ -117,37 +128,35 @@ Edit appsettings.json to set defaults (Windows-style paths):
     }
   }
 }
+```
 
+- **SolutionRoot**: default for **Project Mapping** task.  
+- **DomainRoot**: default for **Full Code Extract** task.  
+- **OutputRoot**: where all outputs are written (e.g., `ProjectMapping_YYYYMMDD.json`).  
 
-SolutionRoot: default for Project Mapping task.
-DomainRoot: default for Full Code Extract task.
-OutputRoot: where all outputs are written (e.g., ProjectMapping_YYYYMMDD.json).
-Note: In raw JSON, backslashes appear as \\. When parsed, they become single \.
-
----
+> Note: In raw JSON, backslashes appear as `\\`. When parsed, they become single `\`.
 
 ### Interactive Session Example
 
+```
 =============================================
-Solution Insight for AI (Phase 1)
-.NET 9 Console Application
+  Solution Insight for AI (Phase 1)
+  .NET 9 Console Application
+=============================================
+
 Select a Task
 Choose what you want the app to do.
-
-ProjectMapping
-
-FullCodeExtract
+  1. ProjectMapping
+  2. FullCodeExtract
 Enter number [default: ProjectMapping]: 1
 
-Enter the path to the .NET solution or root folder [default: E:_Projects\Darwin]:
+Enter the path to the .NET solution or root folder [default: E:\_Projects\Darwin]:
 Also extract class comments? (y/n) [default: Y]: y
 Also extract method comments? (y/n) [default: N]: n
 
 Mapping completed. Output written to:
-E:_Projects\Darwin.Files\ProjectMapping_20250925.json
-
-
-> Tip: For **Full Code Extract**, choose option `2` and provide the subpath (default: `E:\_Projects\Darwin\src\Darwin.Domain`) and whether to include subfolders (`Y`/`N`).
+E:\_Projects\Darwin.Files\ProjectMapping_20250925.json
+```
 
 ---
 
@@ -177,14 +186,15 @@ E:_Projects\Darwin.Files\ProjectMapping_20250925.json
 - **Quality suggestions**
   > “Review the signatures and comments in the JSON map and propose naming/design improvements aligned with clean architecture.”
 
-
 ---
 
 ## Output Schema (Project Mapping JSON)
 
 **File name**
 
+```
 ProjectMapping_YYYYMMDD.json
+```
 
 **Structure**
 
@@ -193,10 +203,10 @@ ProjectMapping_YYYYMMDD.json
   "schema": "darwin/project-mapping",
   "schemaVersion": "1.2",
   "generatedAtUtc": "2025-09-25T08:00:00Z",
-  "root": "E:\\\\_Projects\\\\Darwin",
+  "root": "E:\\_Projects\\Darwin",
   "files": [
     {
-      "filePath": "E:\\\\_Projects\\\\Darwin\\\\src\\\\Darwin.Application\\\\CartCheckout\\\\Commands\\\\AddItemToCartHandler.cs",
+      "filePath": "E\\_Projects\\Darwin\\src\\Darwin.Application\\CartCheckout\\Commands\\AddItemToCartHandler.cs",
       "members": [
         {
           "name": "AddItemToCartHandler",
@@ -220,17 +230,13 @@ ProjectMapping_YYYYMMDD.json
     }
   ]
 }
+```
 
-
-Notes
-
-filePath appears once per file; members do not repeat it.
-
-signature excludes the method/type body { ... }.
-
-summaryComment is a single-line, cleaned text (no ///, //, /*…*/, or XML tags).
-
-Backslashes are escaped as \\ in raw JSON (parsed value is \).
+**Notes**
+- `filePath` appears **once per file**; members do **not** repeat it.
+- `signature` excludes the method/type body `{ ... }`.
+- `summaryComment` is a single-line, cleaned text (no `///`, `//`, `/*…*/`, or XML tags).
+- Backslashes are escaped as `\\` in raw JSON (parsed value is `\`).
 
 ---
 
@@ -248,12 +254,11 @@ Backslashes are escaped as \\ in raw JSON (parsed value is \).
 - Keep your **appsettings.json** outside of VCS if it contains machine-specific or private paths.
 - Consider adding a company policy section in your repo on “**LLM Usage**” (what may/may not be shared).
 
-
 ---
 
 ## Troubleshooting
 
-- **Backslashes show as `\\` in JSON**  
+- **Backslashes show as `\` in JSON**  
   This is correct per JSON spec for strings; parsed value is a single `\`.
 
 - **Generics show as `\u003C` / `\u003E`**  
@@ -265,7 +270,8 @@ Backslashes are escaped as \\ in raw JSON (parsed value is \).
   `Microsoft.Extensions.Configuration`, `...Json`, `...EnvironmentVariables`, `...Binder`.
 
 - **Mermaid diagrams not rendering on GitHub**  
-  Ensure repository settings enable Mermaid, or wrap with triple-backticks `mermaid`.
+  Use labels with newline escapes instead of HTML tags, e.g., `A["Console App\n(.NET 9)"]`.
+  Ensure the code block is fenced with ```mermaid and closed properly.
 
 - **Missing comments in output**  
   Turn on prompts accordingly: class comments (Y), method comments (Y).  
@@ -323,11 +329,12 @@ Contributions are welcome! Please:
 - Keep comments in **English** inside code; user-facing docs can be localized.
 - For performance, avoid loading entire large files into memory repeatedly; stream where possible.
 
+---
 
 ## License
 
 This project is licensed under the **MIT License**.
-
+See the `LICENSE` file at the repository root for the full text.
 
 ---
 
@@ -350,5 +357,3 @@ This project is licensed under the **MIT License**.
 - Avoids repeating `filePath` for each member; declared once per file.
 - Adds class/record signatures to the output.
 - Configuration via `appsettings.json` for default paths and export options.
-
-
