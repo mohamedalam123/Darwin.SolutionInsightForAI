@@ -1,135 +1,126 @@
 ﻿using Darwin.SolutionInsightForAI.Models;
 using Darwin.SolutionInsightForAI.Parsing;
 using Darwin.SolutionInsightForAI.Utilities;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Encodings.Web;
 
-namespace Darwin.SolutionInsightForAI.Services
+namespace Darwin.SolutionInsightForAI.Services;
+
+/// <summary>
+/// Scans a root folder, lists important files, and for .cs files extracts classes/records and method/ctor signatures.
+/// Writes a single JSON file like ProjectMapping_YYYYMMDD.json under the configured output root.
+/// JSON schema: { schema, schemaVersion, generatedAtUtc, root, files: [ { filePath, members: [ { name, kind, signature, summaryComment } ] } ] }
+/// </summary>
+public sealed class ProjectMappingService
 {
-    /// <summary>
-    /// Scans a solution/root folder, lists important files, and for .cs files extracts classes and method signatures.
-    /// Writes a single JSON output file named like ProjectMapping_YYYYMMDD.json under the configured output root.
-    /// </summary>
-    public sealed class ProjectMappingService
+    private static readonly HashSet<string> ImportantExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        private static readonly HashSet<string> ImportantExtensions = new(StringComparer.OrdinalIgnoreCase)
+        ".cs", ".cshtml", ".html", ".htm", ".js", ".css"
+    };
+
+    private readonly OutputWriter _writer;
+    private readonly CSharpCodeParser _parser = new();
+
+    public ProjectMappingService(OutputWriter writer)
+    {
+        _writer = writer;
+    }
+
+    public string Execute(ProjectMappingOptions options)
+    {
+        var outputFile = _writer.BuildDatedFileName("ProjectMapping", "json");
+
+        if (!Directory.Exists(options.RootPath))
+            throw new DirectoryNotFoundException($"Root path not found: {options.RootPath}");
+
+        var filesSection = new List<object>();
+
+        var files = Directory.EnumerateFiles(options.RootPath, "*", SearchOption.AllDirectories)
+            .Where(f => ImportantExtensions.Contains(Path.GetExtension(f)))
+            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var file in files)
         {
-            ".cs", ".cshtml", ".html", ".htm", ".js", ".css"
-        };
-
-        private readonly OutputWriter _writer;
-        private readonly CSharpCodeParser _parser = new();
-
-        public ProjectMappingService(OutputWriter writer)
-        {
-            _writer = writer;
-        }
-
-        /// <summary>
-        /// Executes the mapping and writes JSON output (schema + members per file).
-        /// </summary>
-        public string Execute(ProjectMappingOptions options)
-        {
-            // Determine output file name (JSON)
-            var outputFile = _writer.BuildDatedFileName("ProjectMapping", "json");
-
-            if (!Directory.Exists(options.RootPath))
+            var absPath = Path.GetFullPath(file); // keep Windows-style backslashes (JSON will escape them as \\)
+            if (!Path.GetExtension(file).Equals(".cs", StringComparison.OrdinalIgnoreCase))
             {
-                throw new DirectoryNotFoundException($"Root path not found: {options.RootPath}");
+                filesSection.Add(new
+                {
+                    filePath = absPath,
+                    members = Array.Empty<object>()
+                });
+                continue;
             }
 
-            // Build the payload
-            var filesPayload = new List<object>();
+            var code = File.ReadAllText(file);
+            var classes = _parser.ExtractClasses(code, options.IncludeClassComments, options.IncludeMethodComments);
 
-            var files = Directory.EnumerateFiles(options.RootPath, "*", SearchOption.AllDirectories)
-                .Where(f => ImportantExtensions.Contains(Path.GetExtension(f)))
-                .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            var members = new List<object>();
 
-            foreach (var file in files)
+            foreach (var cls in classes)
             {
-                // Keep Windows-style paths (backslashes). JSON will escape them to \\ as expected.
-                var absPath = Path.GetFullPath(file);
-
-                // If not C#, just emit an empty Members array (to align with the sample structure).
-                if (!Path.GetExtension(file).Equals(".cs", StringComparison.OrdinalIgnoreCase))
+                // Class/record entry with signature and summary
+                members.Add(new
                 {
-                    filesPayload.Add(new
-                    {
-                        FilePath = absPath,
-                        Members = Array.Empty<object>()
-                    });
-                    continue;
-                }
+                    name = cls.Name,
+                    kind = "Class",
+                    signature = cls.Signature,              // e.g., "public class Foo<T>"
+                    summaryComment = cls.Comment ?? string.Empty
+                });
 
-                // Parse .cs files: classes/records + method/ctor signatures (full line until before '{')
-                var code = File.ReadAllText(file);
-                var classes = _parser.ExtractClasses(code, options.IncludeClassComments, options.IncludeMethodComments);
-
-                // Flatten to "Members" to mirror sample structure but richer (Signature for methods/ctors)
-                var members = new List<object>();
-                foreach (var cls in classes)
+                if (cls.Methods.Count > 0)
                 {
-                    members.Add(new
-                    {
-                        Name = cls.Name,
-                        Kind = "Class",
-                        FilePath = absPath,
-                        SummaryComment = cls.Comment ?? string.Empty
-                    });
-
-                    // Methods (full signature line as requested)
                     foreach (var m in cls.Methods)
                     {
                         members.Add(new
                         {
-                            Name = ExtractMethodNameFromSignature(m.SignatureLine),
-                            Kind = "Method",
-                            FilePath = absPath,
-                            SummaryComment = string.Empty, // class-level comments already captured; method doc can be added if IncludeMethodComments was true and you choose to extract it similarly
-                            Signature = m.SignatureLine
+                            name = ExtractMethodNameFromSignature(m.SignatureLine),
+                            kind = "Method",
+                            signature = m.SignatureLine,      // full method signature (no '{')
+                            summaryComment = m.Comment ?? string.Empty
                         });
                     }
                 }
-
-                filesPayload.Add(new
-                {
-                    FilePath = absPath,
-                    Members = members
-                });
             }
 
-            var payload = new
+            filesSection.Add(new
             {
-                schema = "darwin/project-mapping",
-                schemaVersion = "1.2",
-                generatedAtUtc = DateTime.UtcNow,
-                root = Path.GetFullPath(options.RootPath),
-                files = filesPayload
-            };
-
-            var jsonOptions = new JsonSerializerOptions
-            {
-                WriteIndented = true,
-                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-            };
-
-            // Write JSON
-            var path = _writer.WriteAllText(outputFile, JsonSerializer.Serialize(payload, jsonOptions));
-            return path;
+                filePath = absPath,
+                members
+            });
         }
 
-        /// <summary>
-        /// Extracts method name from a signature line. Best-effort parse: splits by '(' and takes the token before it.
-        /// Example: "private static string CondenseToOneLine(string text)" -> "CondenseToOneLine"
-        /// </summary>
-        private static string ExtractMethodNameFromSignature(string signatureLine)
+        var payload = new
         {
-            // Strip generics/return type tokens by taking the last token before '('
-            var beforeParen = signatureLine.Split('(')[0];
-            var tokens = beforeParen.Trim().Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-            return tokens.Length == 0 ? string.Empty : tokens[^1];
-        }
+            schema = "darwin/project-mapping",
+            schemaVersion = "1.2",
+            generatedAtUtc = DateTime.UtcNow,
+            root = Path.GetFullPath(options.RootPath),
+            files = filesSection
+        };
+
+        var jsonOptions = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            // Keep '<' and '>' as-is in signatures (avoid \u003C and \u003E)
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        };
+
+        var path = _writer.WriteAllText(outputFile, JsonSerializer.Serialize(payload, jsonOptions));
+        return path;
+    }
+
+    /// <summary>
+    /// Extracts method name from a signature line by taking the token before '('.
+    /// Example: "public async Task<Guid> HandleAsync(...)" -> "HandleAsync"
+    /// </summary>
+    private static string ExtractMethodNameFromSignature(string signatureLine)
+    {
+        var beforeParen = signatureLine.Split('(')[0];
+        var tokens = beforeParen.Trim().Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        return tokens.Length == 0 ? string.Empty : tokens[^1];
     }
 }

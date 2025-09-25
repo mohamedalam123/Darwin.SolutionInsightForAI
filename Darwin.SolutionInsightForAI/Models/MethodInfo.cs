@@ -13,5 +13,8 @@ namespace Darwin.SolutionInsightForAI.Models
     {
         /// <summary>Full signature line as it appears (trimmed); includes modifiers, return type, name, and parameters.</summary>
         public required string SignatureLine { get; init; }
+
+        /// <summary>Optional leading comment text associated with the method/ctor (cleaned; XML tags and /// removed).</summary>
+        public string? Comment { get; init; }
     }
 }
