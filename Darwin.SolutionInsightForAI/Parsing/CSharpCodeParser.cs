@@ -8,13 +8,13 @@ using System.Text.RegularExpressions;
 namespace Darwin.SolutionInsightForAI.Parsing;
 
 /// <summary>
-/// Parses C# source files via Roslyn and extracts classes/records with their leading comments
-/// and member (method/ctor) signatures. Produces single-line signatures and single-line cleaned comments.
+/// Parses C# source files via Roslyn and extracts types (class/record/interface/struct)
+/// with their cleaned leading comments and member (method/ctor) single-line signatures.
 /// </summary>
 public sealed class CSharpCodeParser
 {
     /// <summary>
-    /// Parse a C# file and return extracted classes (with methods and optional comments).
+    /// Parse a C# file and return extracted types (with methods and optional comments).
     /// </summary>
     public IReadOnlyList<ClassInfo> ExtractClasses(
         string sourceCode,
@@ -30,12 +30,22 @@ public sealed class CSharpCodeParser
         {
             if (node is ClassDeclarationSyntax classDecl)
             {
-                var info = BuildClassInfo(classDecl, includeClassComments, includeMethodComments);
+                var info = BuildTypeInfo(classDecl, "Class", includeClassComments, includeMethodComments);
                 results.Add(info);
             }
             else if (node is RecordDeclarationSyntax recordDecl)
             {
-                var info = BuildRecordInfo(recordDecl, includeClassComments, includeMethodComments);
+                var info = BuildTypeInfo(recordDecl, "Record", includeClassComments, includeMethodComments);
+                results.Add(info);
+            }
+            else if (node is InterfaceDeclarationSyntax interfaceDecl)
+            {
+                var info = BuildTypeInfo(interfaceDecl, "Interface", includeClassComments, includeMethodComments);
+                results.Add(info);
+            }
+            else if (node is StructDeclarationSyntax structDecl)
+            {
+                var info = BuildTypeInfo(structDecl, "Struct", includeClassComments, includeMethodComments);
                 results.Add(info);
             }
         }
@@ -43,92 +53,71 @@ public sealed class CSharpCodeParser
         return results;
     }
 
-    private static ClassInfo BuildClassInfo(
-        ClassDeclarationSyntax classDecl,
-        bool includeClassComments,
-        bool includeMethodComments)
+    /// <summary>
+    /// Builds a ClassInfo for any class-like declaration (class/record/interface/struct).
+    /// </summary>
+    private static ClassInfo BuildTypeInfo(
+        BaseTypeDeclarationSyntax typeDecl,
+        string kind,
+        bool includeTypeComments,
+        bool includeMemberComments)
     {
-        var className = classDecl.Identifier.Text;
+        // Common name extraction for all type declarations (class/record/interface/struct)
+        var name = (typeDecl as TypeDeclarationSyntax)?.Identifier.Text
+                   ?? (typeDecl as RecordDeclarationSyntax)?.Identifier.Text
+                   ?? string.Empty;
 
-        string? classComment = null;
-        if (includeClassComments)
-            classComment = ExtractLeadingCommentText(classDecl);
+        string? typeComment = null;
+        if (includeTypeComments)
+            typeComment = ExtractLeadingCommentText(typeDecl);
 
-        var classSig = BuildTypeSignature(classDecl);
+        var typeSig = BuildTypeSignature(typeDecl);
 
-        var cls = new ClassInfo { Name = className, Comment = classComment, Signature = classSig };
-
-        foreach (var member in classDecl.Members)
+        var info = new ClassInfo
         {
-            switch (member)
-            {
-                case MethodDeclarationSyntax method:
-                    cls.Methods.Add(new MethodInfo
-                    {
-                        SignatureLine = BuildMethodSignature(method),
-                        Comment = includeMethodComments ? ExtractLeadingCommentText(method) : null
-                    });
-                    break;
+            Name = name,
+            Kind = kind,
+            Comment = typeComment,
+            Signature = typeSig
+        };
 
-                case ConstructorDeclarationSyntax ctor:
-                    cls.Methods.Add(new MethodInfo
-                    {
-                        SignatureLine = BuildConstructorSignature(ctor),
-                        Comment = includeMethodComments ? ExtractLeadingCommentText(ctor) : null
-                    });
-                    break;
+        // IMPORTANT: BaseTypeDeclarationSyntax does not have 'Members'.
+        // Only TypeDeclarationSyntax (class/interface/struct/record) exposes Members.
+        if (typeDecl is TypeDeclarationSyntax tds)
+        {
+            foreach (var member in tds.Members)
+            {
+                switch (member)
+                {
+                    case MethodDeclarationSyntax method:
+                        info.Methods.Add(new MethodInfo
+                        {
+                            SignatureLine = BuildMethodSignature(method),
+                            Comment = includeMemberComments ? ExtractLeadingCommentText(method) : null
+                        });
+                        break;
+
+                    case ConstructorDeclarationSyntax ctor:
+                        info.Methods.Add(new MethodInfo
+                        {
+                            SignatureLine = BuildConstructorSignature(ctor),
+                            Comment = includeMemberComments ? ExtractLeadingCommentText(ctor) : null
+                        });
+                        break;
+                }
             }
         }
 
-        return cls;
-    }
-
-    private static ClassInfo BuildRecordInfo(
-        RecordDeclarationSyntax recordDecl,
-        bool includeClassComments,
-        bool includeMethodComments)
-    {
-        var name = recordDecl.Identifier.Text;
-
-        string? classComment = null;
-        if (includeClassComments)
-            classComment = ExtractLeadingCommentText(recordDecl);
-
-        var classSig = BuildTypeSignature(recordDecl);
-
-        var cls = new ClassInfo { Name = name, Comment = classComment, Signature = classSig };
-
-        foreach (var member in recordDecl.Members)
-        {
-            switch (member)
-            {
-                case MethodDeclarationSyntax method:
-                    cls.Methods.Add(new MethodInfo
-                    {
-                        SignatureLine = BuildMethodSignature(method),
-                        Comment = includeMethodComments ? ExtractLeadingCommentText(method) : null
-                    });
-                    break;
-
-                case ConstructorDeclarationSyntax ctor:
-                    cls.Methods.Add(new MethodInfo
-                    {
-                        SignatureLine = BuildConstructorSignature(ctor),
-                        Comment = includeMethodComments ? ExtractLeadingCommentText(ctor) : null
-                    });
-                    break;
-            }
-        }
-
-        return cls;
+        return info;
     }
 
     /// <summary>
-    /// Builds a readable single-line signature for class/record/struct/interface.
+    /// Builds a readable single-line signature for a type (class/record/interface/struct).
     /// </summary>
     private static string BuildTypeSignature(BaseTypeDeclarationSyntax node)
     {
         var modifiers = string.Join(" ", node.Modifiers.Select(m => m.Text)).Trim();
+
         var kind = node.Kind() switch
         {
             SyntaxKind.ClassDeclaration => "class",
@@ -151,8 +140,7 @@ public sealed class CSharpCodeParser
     }
 
     /// <summary>
-    /// Builds a method signature (modifiers + return type + name + generic args + params + constraints),
-    /// single-lined (no '{').
+    /// Builds a method signature (modifiers + return type + name + generics + params + constraints), single-line (no '{').
     /// </summary>
     private static string BuildMethodSignature(MethodDeclarationSyntax method)
     {
@@ -162,26 +150,24 @@ public sealed class CSharpCodeParser
         var tps = method.TypeParameterList?.ToString() ?? "";
         var pars = method.ParameterList.ToString();
         var cons = string.Concat(method.ConstraintClauses.Select(c => " " + c.ToFullString().Trim()));
-
         var raw = $"{(string.IsNullOrEmpty(mods) ? "" : mods + " ")}{ret} {name}{tps}{pars}{cons}";
         return CondenseToOneLine(raw);
     }
 
     /// <summary>
-    /// Builds a constructor signature (modifiers + name + params), single-lined (no '{').
+    /// Builds a constructor signature (modifiers + name + params), single-line (no '{').
     /// </summary>
     private static string BuildConstructorSignature(ConstructorDeclarationSyntax ctor)
     {
         var mods = string.Join(" ", ctor.Modifiers.Select(m => m.Text)).Trim();
         var name = ctor.Identifier.Text;
         var pars = ctor.ParameterList.ToString();
-
         var raw = $"{(string.IsNullOrEmpty(mods) ? "" : mods + " ")}{name}{pars}";
         return CondenseToOneLine(raw);
     }
 
     /// <summary>
-    /// Extracts a readable one-line leading comment from trivia:
+    /// Extracts a cleaned one-line leading comment from trivia:
     /// - XML doc (/// or /** */) -> tags removed, condensed
     /// - Single-line '//' -> markers removed, condensed
     /// - Multi-line '/* ... */' -> markers removed, condensed
@@ -197,7 +183,6 @@ public sealed class CSharpCodeParser
             {
                 if (trivia.IsKind(SyntaxKind.SingleLineCommentTrivia))
                 {
-                    // Strip leading '//' and trim.
                     var text = trivia.ToFullString();
                     if (text.StartsWith("//")) text = text[2..];
                     text = text.Trim();
@@ -205,7 +190,6 @@ public sealed class CSharpCodeParser
                 }
                 else if (trivia.IsKind(SyntaxKind.MultiLineCommentTrivia))
                 {
-                    // Remove /* */ and condense.
                     var text = trivia.ToFullString()
                         .Replace("/*", string.Empty)
                         .Replace("*/", string.Empty);
@@ -215,7 +199,6 @@ public sealed class CSharpCodeParser
                 else if (trivia.IsKind(SyntaxKind.SingleLineDocumentationCommentTrivia) ||
                          trivia.IsKind(SyntaxKind.MultiLineDocumentationCommentTrivia))
                 {
-                    // XML doc: remove '///' occurrences and XML tags, then condense.
                     var xml = trivia.ToFullString().Replace("///", string.Empty);
                     var condensed = CondenseXmlDocToSingleLine(xml);
                     if (!string.IsNullOrWhiteSpace(condensed)) sb.AppendLine(condensed);
@@ -223,10 +206,10 @@ public sealed class CSharpCodeParser
             }
         }
 
-        // 1) Comments directly attached to the node (typical case).
+        // Comments directly attached to the node
         CollectFromTriviaList(node.GetLeadingTrivia());
 
-        // 2) If the declaration has attributes, sometimes comments attach to the attribute list's leading trivia.
+        // Comments that may attach to attribute lists above the declaration
         foreach (var attrList in node.ChildNodes().OfType<AttributeListSyntax>())
             CollectFromTriviaList(attrList.GetLeadingTrivia());
 
@@ -234,9 +217,6 @@ public sealed class CSharpCodeParser
         return string.IsNullOrWhiteSpace(result) ? (string?)null : result;
     }
 
-    /// <summary>
-    /// Removes XML tags and collapses whitespace to a single line.
-    /// </summary>
     private static string CondenseXmlDocToSingleLine(string xml)
     {
         var noTags = Regex.Replace(xml, "<.*?>", " ");
@@ -244,7 +224,7 @@ public sealed class CSharpCodeParser
     }
 
     /// <summary>
-    /// Collapses all whitespace (including CR/LF and tabs) into a single space, trims ends.
+    /// Collapses all whitespace (including CR/LF and tabs) into a single space, then trims.
     /// </summary>
     private static string CondenseToOneLine(string text)
     {

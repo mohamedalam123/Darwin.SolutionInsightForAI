@@ -8,18 +8,23 @@ using System.Threading.Tasks;
 namespace Darwin.SolutionInsightForAI.Models
 {
     /// <summary>
-    /// Represents a C# class (or record/class-like) and its metadata extracted via Roslyn.
+    /// Represents a C# type (class/record/interface/struct) and its extracted metadata.
     /// </summary>
     public sealed class ClassInfo
     {
+        /// <summary>Simple name of the type (identifier text).</summary>
         public required string Name { get; init; }
 
-        /// <summary>Optional leading comment text associated with the class/record (cleaned; XML tags and /// removed).</summary>
+        /// <summary>High-level kind of the type: "Class", "Record", "Interface", or "Struct".</summary>
+        public required string Kind { get; init; }
+
+        /// <summary>Cleaned, single-line leading comment associated with the type (XML tags and /// removed).</summary>
         public string? Comment { get; init; }
 
-        /// <summary>Full declaration signature for the class/record (e.g., "public class Foo&lt;T&gt;").</summary>
+        /// <summary>Full type declaration signature (e.g., "public interface IFoo<T>").</summary>
         public string? Signature { get; init; }
 
+        /// <summary>Declared methods/constructors (signatures only) under this type.</summary>
         public List<MethodInfo> Methods { get; } = new();
     }
 }

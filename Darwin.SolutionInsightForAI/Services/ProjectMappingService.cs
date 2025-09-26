@@ -8,9 +8,8 @@ using System.Text.Encodings.Web;
 namespace Darwin.SolutionInsightForAI.Services;
 
 /// <summary>
-/// Scans a root folder, lists important files, and for .cs files extracts classes/records and method/ctor signatures.
+/// Scans a root folder, lists important files, and for .cs files extracts types and member signatures.
 /// Writes a single JSON file like ProjectMapping_YYYYMMDD.json under the configured output root.
-/// JSON schema: { schema, schemaVersion, generatedAtUtc, root, files: [ { filePath, members: [ { name, kind, signature, summaryComment } ] } ] }
 /// </summary>
 public sealed class ProjectMappingService
 {
@@ -43,7 +42,8 @@ public sealed class ProjectMappingService
 
         foreach (var file in files)
         {
-            var absPath = Path.GetFullPath(file); // keep Windows-style backslashes (JSON will escape them as \\)
+            var absPath = Path.GetFullPath(file); // Windows-style backslashes (JSON escapes as \\)
+
             if (!Path.GetExtension(file).Equals(".cs", StringComparison.OrdinalIgnoreCase))
             {
                 filesSection.Add(new
@@ -55,30 +55,31 @@ public sealed class ProjectMappingService
             }
 
             var code = File.ReadAllText(file);
-            var classes = _parser.ExtractClasses(code, options.IncludeClassComments, options.IncludeMethodComments);
+            var types = _parser.ExtractClasses(code, options.IncludeClassComments, options.IncludeMethodComments);
 
             var members = new List<object>();
 
-            foreach (var cls in classes)
+            foreach (var t in types)
             {
-                // Class/record entry with signature and summary
+                // Emit the type (class/record/interface/struct)
                 members.Add(new
                 {
-                    name = cls.Name,
-                    kind = "Class",
-                    signature = cls.Signature,              // e.g., "public class Foo<T>"
-                    summaryComment = cls.Comment ?? string.Empty
+                    name = t.Name,
+                    kind = t.Kind,                // "Class", "Record", "Interface", "Struct"
+                    signature = t.Signature,      // e.g., "public interface IFoo<T>"
+                    summaryComment = t.Comment ?? string.Empty
                 });
 
-                if (cls.Methods.Count > 0)
+                // Emit methods/constructors
+                if (t.Methods.Count > 0)
                 {
-                    foreach (var m in cls.Methods)
+                    foreach (var m in t.Methods)
                     {
                         members.Add(new
                         {
                             name = ExtractMethodNameFromSignature(m.SignatureLine),
                             kind = "Method",
-                            signature = m.SignatureLine,      // full method signature (no '{')
+                            signature = m.SignatureLine,
                             summaryComment = m.Comment ?? string.Empty
                         });
                     }
@@ -105,7 +106,7 @@ public sealed class ProjectMappingService
         {
             WriteIndented = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-            // Keep '<' and '>' as-is in signatures (avoid \u003C and \u003E)
+            // Preserve '<' and '>' in generics
             Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         };
 
